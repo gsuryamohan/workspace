@@ -20,6 +20,7 @@ env/
 # Build / output
 dist/
 build/
+target/
 *.egg-info/
 .eggs/
 

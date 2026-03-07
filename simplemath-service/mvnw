@@ -1,0 +1,43 @@
+#!/bin/sh
+# ----------------------------------------------------------------------------
+# Maven Wrapper startup script, version 3.3.2
+#
+# Required files:
+# - .mvn/wrapper/maven-wrapper.properties
+#
+# This script downloads the Maven Wrapper JAR and a Maven distribution on demand.
+# ----------------------------------------------------------------------------
+
+set -euf
+
+BASE_DIR=$(cd "$(dirname "$0")" && pwd)
+WRAPPER_DIR="$BASE_DIR/.mvn/wrapper"
+PROPS_FILE="$WRAPPER_DIR/maven-wrapper.properties"
+WRAPPER_JAR="$WRAPPER_DIR/maven-wrapper.jar"
+
+if [ ! -f "$PROPS_FILE" ]; then
+  echo "Missing $PROPS_FILE" 1>&2
+  exit 1
+fi
+
+get_prop() {
+  key="$1"
+  grep -E "^${key}=" "$PROPS_FILE" | head -n 1 | sed -E "s/^${key}=//"
+}
+
+WRAPPER_URL=$(get_prop "wrapperUrl")
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+  mkdir -p "$WRAPPER_DIR"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$WRAPPER_URL" -o "$WRAPPER_JAR"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$WRAPPER_URL" -O "$WRAPPER_JAR"
+  else
+    echo "Need curl or wget to download Maven Wrapper." 1>&2
+    exit 1
+  fi
+fi
+
+exec java -Dmaven.multiModuleProjectDirectory="$BASE_DIR" -classpath "$WRAPPER_JAR" org.apache.maven.wrapper.MavenWrapperMain "$@"
+
