@@ -21,6 +21,8 @@ env/
 dist/
 build/
 target/
+out/
+*.jar
 *.egg-info/
 .eggs/
 
