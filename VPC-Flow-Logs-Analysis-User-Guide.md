@@ -2,7 +2,7 @@
 
 This guide walks you through analyzing VPC Flow Logs stored in Amazon S3 to understand traffic patterns across your VPCs.
 
-**Guide structure:** **Page 1** (Sections 1–8) covers setup, table creation, example queries, and optional steps. **Page 2** covers troubleshooting when the Athena table returns no rows—root cause (including partitioning) and the fix. **Page 3** covers VPC Flow Log 2 (per-hour): Athena table setup, partition key definition, and querying.
+**Guide structure:** **Page 1** (Sections 1–9) covers setup, table creation, example queries, optional steps, and a customized view of VPC flow logs data. **Page 2** covers troubleshooting when the Athena table returns no rows—root cause (including partitioning) and the fix. **Page 3** covers VPC Flow Log 2 (per-hour): Athena table setup, partition key definition, and querying.
 
 ---
 
@@ -214,6 +214,114 @@ ORDER BY bytes DESC;
 - [VPC Flow Logs](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html) – AWS documentation
 - [Flow log record format](https://docs.aws.amazon.com/vpc/latest/userguide/flow-log-records.html) – Field definitions
 - [Querying flow logs with Athena](https://docs.aws.amazon.com/athena/latest/ug/vpc-flow-logs.html) – Athena integration
+
+---
+
+## 9. Customized View of VPC Flow Logs Data
+
+Flow log records do **not** include VPC IDs for source or destination—only IP addresses (`srcaddr`, `dstaddr`) and `interface_id`. To add **Source-VPC** and **Client-VPC** (or Destination-VPC) columns and have them populated, you must join with external metadata. This section outlines ways to achieve that.
+
+### Why VPC columns are not in the table by default
+
+- Flow logs contain: `srcaddr`, `dstaddr`, `interface_id`, and other fields.
+- VPC IDs are not part of the flow log record; they come from EC2/ENI metadata.
+- Any “Source-VPC” or “Client-VPC” column must be derived via a lookup or view.
+
+### Option 1: Athena VIEW + ENI lookup table (query-time)
+
+Use a separate ENI→VPC lookup table and join at query time.
+
+1. **Create an ENI metadata table** (populate from EC2 `DescribeNetworkInterfaces`):
+
+```sql
+CREATE EXTERNAL TABLE vpc_flow_logs_db.eni_vpc_mapping (
+  interface_id string,
+  vpc_id string,
+  subnet_id string,
+  private_ip string
+)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
+LOCATION 's3://your-bucket/eni-metadata/';
+```
+
+2. **Populate** the table via a script or Glue job that runs periodically (e.g. daily).
+3. **Create a VIEW** that joins the flow log table with the lookup:
+
+```sql
+CREATE OR REPLACE VIEW vpc_flow_logs_db.surya_vpcflowlogs_hourly_with_vpc AS
+SELECT
+  f.*,
+  COALESCE(src_eni.vpc_id, 'External') AS source_vpc_id,
+  COALESCE(dst_eni.vpc_id, 'External') AS destination_vpc_id
+FROM vpc_flow_logs_db."surya-vpcflowlogs-hourly" f
+LEFT JOIN vpc_flow_logs_db.eni_vpc_mapping src_eni ON f.srcaddr = src_eni.private_ip
+LEFT JOIN vpc_flow_logs_db.eni_vpc_mapping dst_eni ON f.dstaddr = dst_eni.private_ip;
+```
+
+**Automatic:** The view always computes VPC on read; the lookup table must be refreshed periodically.
+
+### Option 2: Glue ETL job (scheduled enrichment)
+
+Use AWS Glue to enrich flow logs and write to a new S3 path; point an Athena table at that path.
+
+1. **Glue job** reads raw flow logs from S3.
+2. Calls EC2 `DescribeNetworkInterfaces` to build `interface_id → vpc_id` and `private_ip → vpc_id` mappings.
+3. For each flow row, sets `source_vpc_id` and `destination_vpc_id`.
+4. Writes enriched data (e.g. Parquet) to a new S3 prefix.
+5. Create an **Athena table** (or partitions) over the enriched prefix.
+6. **Schedule** the Glue job (e.g. hourly) via EventBridge or Glue triggers.
+
+**Automatic:** New flow log data is enriched as the job runs on schedule.
+
+### Option 3: Athena VIEW with CASE (manual mapping)
+
+Use a VIEW with hardcoded IP→VPC mapping for a small, known set of IPs.
+
+```sql
+CREATE OR REPLACE VIEW vpc_flow_logs_db.surya_vpcflowlogs_with_vpc AS
+SELECT
+  *,
+  CASE
+    WHEN srcaddr = '172.31.22.90' THEN 'Server-VPC'
+    WHEN srcaddr IN ('54.188.177.201','34.213.127.21') THEN 'Client-VPC'
+    WHEN srcaddr LIKE '172.31.%' THEN 'Private'
+    ELSE 'External'
+  END AS source_vpc,
+  CASE
+    WHEN dstaddr = '172.31.22.90' THEN 'Server-VPC'
+    WHEN dstaddr IN ('54.188.177.201','34.213.127.21') THEN 'Client-VPC'
+    WHEN dstaddr LIKE '172.31.%' THEN 'Private'
+    ELSE 'External'
+  END AS destination_vpc
+FROM vpc_flow_logs_db."surya-vpcflowlogs-hourly";
+```
+
+**Automatic:** The view is always used; you must update the CASE expressions when IPs or VPCs change.
+
+### Option 4: Lambda on S3 event (near real-time enrichment)
+
+Use S3 event notifications to trigger a Lambda that enriches new flow log files and writes to another prefix.
+
+1. **S3 event** invokes Lambda when new objects arrive under the flow log prefix.
+2. **Lambda** reads flow log records, calls EC2 for ENI/IP→VPC mapping, adds `source_vpc` and `destination_vpc`.
+3. Lambda writes enriched data to a different S3 prefix.
+4. **Athena table** (or new table) reads from the enriched prefix.
+
+**Automatic:** Enrichment runs as new flow log files are written.
+
+### Comparison
+
+| Approach | Automatic? | Effort | Best for |
+|----------|------------|--------|----------|
+| VIEW + ENI lookup table | Partially (refresh lookup) | Medium | Few ENIs; can run a script to update mapping |
+| Glue ETL | Yes | Higher | Bulk, scheduled enrichment |
+| VIEW + CASE | Partially (manual mapping updates) | Low | Small, fixed set of IPs |
+| Lambda on S3 event | Yes | Higher | Near real-time enrichment |
+
+### Recommendation
+
+- **Small, known set of IPs (e.g. one server, two clients):** Start with **Option 3** (VIEW + CASE) to get Source-VPC and Client-VPC columns immediately; update the CASE when IPs change.
+- **Larger or changing environment:** Use **Option 1** (VIEW + ENI lookup table) and refresh the lookup periodically, or **Option 2** (Glue ETL) for fully automatic enrichment.
 
 ---
 
