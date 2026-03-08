@@ -90,3 +90,115 @@ WHERE year = '2026' AND month = '03' AND day = '07'
 GROUP BY hour
 ORDER BY hour;
 ```
+
+---
+
+## 6. Listing VPC Details for Source and Destination Addresses
+
+The flow log table **does not contain VPC IDs** for source or destination IPs. It has `srcaddr`, `dstaddr`, and `interface_id`. VPC details must be derived from **external metadata** (ENI mappings or manual lookup) and joined to the flow log table.
+
+### Option 1: Manual mapping for known IPs (no extra tables)
+
+When you know which IPs belong to which VPC, use `CASE` expressions:
+
+```sql
+SELECT
+  srcaddr,
+  dstaddr,
+  CASE
+    WHEN srcaddr = '172.31.22.90' THEN 'Server VPC (surya-server)'
+    WHEN srcaddr = '54.188.177.201' THEN 'Client VPC 1 (surya-client-1)'
+    WHEN srcaddr = '34.213.127.21' THEN 'Client VPC 2 (surya-client-2)'
+    WHEN srcaddr LIKE '172.31.%' THEN 'Private (likely same VPC)'
+    ELSE 'External/Unknown'
+  END AS src_vpc_info,
+  CASE
+    WHEN dstaddr = '172.31.22.90' THEN 'Server VPC (surya-server)'
+    WHEN dstaddr = '54.188.177.201' THEN 'Client VPC 1 (surya-client-1)'
+    WHEN dstaddr = '34.213.127.21' THEN 'Client VPC 2 (surya-client-2)'
+    WHEN dstaddr LIKE '172.31.%' THEN 'Private (likely same VPC)'
+    ELSE 'External/Unknown'
+  END AS dst_vpc_info,
+  SUM(bytes) AS total_bytes
+FROM vpc_flow_logs_db."surya-vpcflowlogs-hourly"
+WHERE year = '2026' AND month = '03' AND day = '07'
+GROUP BY srcaddr, dstaddr
+ORDER BY total_bytes DESC;
+```
+
+### Option 2: VPC info from the capturing ENI (requires ENI metadata table)
+
+The flow log is captured by one ENI, which belongs to one VPC. To get that VPC:
+
+1. **Create an ENI metadata table** (populate from EC2 DescribeNetworkInterfaces):
+
+```sql
+CREATE EXTERNAL TABLE vpc_flow_logs_db.eni_metadata (
+  interface_id string,
+  vpc_id string,
+  subnet_id string,
+  instance_id string,
+  private_ip string,
+  description string
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+LOCATION 's3://your-bucket/eni-metadata/';
+```
+
+2. **Populate it** with rows like:
+```
+eni-00015598130ac74a8    vpc-07905e795d7628027    subnet-xxx    i-096aed3497e86e241    172.31.22.90    Primary
+```
+
+3. **Join flow logs with ENI metadata** (VPC of the capturing ENI):
+
+```sql
+SELECT
+  f.srcaddr,
+  f.dstaddr,
+  e.vpc_id AS capturing_vpc_id,
+  e.subnet_id,
+  e.instance_id,
+  SUM(f.bytes) AS total_bytes
+FROM vpc_flow_logs_db."surya-vpcflowlogs-hourly" f
+LEFT JOIN vpc_flow_logs_db.eni_metadata e ON f.interface_id = e.interface_id
+WHERE f.year = '2026' AND f.month = '03' AND f.day = '07'
+GROUP BY f.srcaddr, f.dstaddr, e.vpc_id, e.subnet_id, e.instance_id
+ORDER BY total_bytes DESC;
+```
+
+### Option 3: Map both srcaddr and dstaddr using ENI private IPs
+
+If your ENI table has `private_ip`, you can map both source and destination to VPC when they match an ENI in your account:
+
+```sql
+WITH eni_lookup AS (
+  SELECT interface_id, vpc_id, subnet_id, private_ip
+  FROM vpc_flow_logs_db.eni_metadata
+)
+SELECT
+  f.srcaddr,
+  f.dstaddr,
+  src_eni.vpc_id AS src_vpc_id,
+  src_eni.subnet_id AS src_subnet_id,
+  dst_eni.vpc_id AS dst_vpc_id,
+  dst_eni.subnet_id AS dst_subnet_id
+FROM vpc_flow_logs_db."surya-vpcflowlogs-hourly" f
+LEFT JOIN eni_lookup src_eni ON f.srcaddr = src_eni.private_ip
+LEFT JOIN eni_lookup dst_eni ON f.dstaddr = dst_eni.private_ip
+WHERE f.year = '2026' AND f.month = '03' AND f.day = '07'
+LIMIT 100;
+```
+
+This only maps IPs that match ENIs in your ENI table (typically private IPs). External IPs (e.g. public IPs of clients) will remain `NULL`.
+
+### Summary
+
+| Requirement | Approach |
+|-------------|----------|
+| No extra tables; small set of known IPs | Option 1: `CASE` / manual mapping |
+| VPC of the ENI that captured the flow | Option 2: ENI metadata table + join on `interface_id` |
+| Map both srcaddr and dstaddr to VPC (when they are ENI private IPs in your account) | Option 3: ENI table with `private_ip`, join on srcaddr and dstaddr |
+
+Flow logs do not include VPC IDs for source and destination; you need one of these mappings or lookup tables.
