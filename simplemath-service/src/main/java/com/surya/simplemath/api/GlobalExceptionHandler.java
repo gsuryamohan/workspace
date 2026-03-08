@@ -37,6 +37,15 @@ public class GlobalExceptionHandler {
         ));
     }
 
+    @ExceptionHandler({NullPointerException.class, IllegalArgumentException.class})
+    public ResponseEntity<ErrorResponse> handleBadRequest(Exception ex) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(
+                "BAD_REQUEST",
+                ex.getMessage() != null ? ex.getMessage() : "Invalid request (use POST with JSON body)",
+                List.of()
+        ));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnknown(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ErrorResponse(

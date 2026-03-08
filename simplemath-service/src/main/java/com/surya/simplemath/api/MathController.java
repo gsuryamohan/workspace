@@ -17,22 +17,28 @@ public class MathController {
     }
 
     @PostMapping("/add")
-    public MathResponse add(@Valid @RequestBody MathRequest request) {
+    public MathResponse add(@Valid @RequestBody(required = false) MathRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Request body required. Use POST with JSON body: {\"a\": number, \"b\": number}");
+        }
         return new MathResponse("Add", request.a(), request.b(), simpleMathService.add(request.a(), request.b()));
     }
 
     @PostMapping("/subtract")
-    public MathResponse subtract(@Valid @RequestBody MathRequest request) {
+    public MathResponse subtract(@Valid @RequestBody(required = false) MathRequest request) {
+        if (request == null) throw new IllegalArgumentException("Request body required. Use POST with JSON: {\"a\": number, \"b\": number}");
         return new MathResponse("Subtract", request.a(), request.b(), simpleMathService.subtract(request.a(), request.b()));
     }
 
     @PostMapping("/multiply")
-    public MathResponse multiply(@Valid @RequestBody MathRequest request) {
+    public MathResponse multiply(@Valid @RequestBody(required = false) MathRequest request) {
+        if (request == null) throw new IllegalArgumentException("Request body required. Use POST with JSON: {\"a\": number, \"b\": number}");
         return new MathResponse("Multiply", request.a(), request.b(), simpleMathService.multiply(request.a(), request.b()));
     }
 
     @PostMapping("/divide")
-    public MathResponse divide(@Valid @RequestBody MathRequest request) {
+    public MathResponse divide(@Valid @RequestBody(required = false) MathRequest request) {
+        if (request == null) throw new IllegalArgumentException("Request body required. Use POST with JSON: {\"a\": number, \"b\": number}");
         return new MathResponse("Divide", request.a(), request.b(), simpleMathService.divide(request.a(), request.b()));
     }
 }
