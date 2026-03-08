@@ -202,3 +202,90 @@ This only maps IPs that match ENIs in your ENI table (typically private IPs). Ex
 | Map both srcaddr and dstaddr to VPC (when they are ENI private IPs in your account) | Option 3: ENI table with `private_ip`, join on srcaddr and dstaddr |
 
 Flow logs do not include VPC IDs for source and destination; you need one of these mappings or lookup tables.
+
+---
+
+## 7. Analyzing Traffic with Amazon QuickSight
+
+This section outlines how to analyze VPC flow logs from `surya-vpcflowlogs-hourly` using Amazon QuickSight dashboards.
+
+### Prerequisites
+
+1. **Athena table:** `vpc_flow_logs_db.surya-vpcflowlogs-hourly` exists, has partitions, and returns data.
+2. **S3:** Athena result location (e.g. `s3://surya-server-vpc-flow-logs/athena-results/`) with IAM access for Athena and QuickSight.
+3. **IAM:** QuickSight user/role has Athena (`athena:GetDataCatalog`, `athena:GetDatabase`, `athena:GetTableMetadata`, `athena:ListDatabases`, `athena:ListTableMetadata`, `athena:StartQueryExecution`, `athena:GetQueryExecution`, `athena:GetQueryResults`), Glue (`glue:GetDatabase`, `glue:GetTable`, `glue:GetTables`, `glue:GetPartitions`), and S3 read permissions.
+
+### Step 1: Enable QuickSight
+
+1. Go to **Amazon QuickSight** in the **same region** as your Athena table (e.g. `us-west-2`).
+2. Sign up or sign in to QuickSight.
+3. Choose an edition (Standard or Enterprise).
+
+### Step 2: Create a Dataset from Athena
+
+1. QuickSight → **Datasets** → **New dataset**.
+2. Choose **Athena** as the data source.
+3. Enter connection name (e.g. `VPC Flow Logs Athena`).
+4. Choose **Create data source**.
+5. Select:
+   - **Database:** `vpc_flow_logs_db`
+   - **Table:** `surya-vpcflowlogs-hourly` (or `"surya-vpcflowlogs-hourly"` if needed)
+6. Choose **SPICE** (faster visuals, needs refresh) or **Direct query** (always fresh, can be slower).
+7. Click **Edit/Preview data** (optional) to verify.
+8. Click **Save & publish** and name the dataset (e.g. `VPC Flow Logs Hourly`).
+
+### Step 3: Configure Fields (optional)
+
+1. In dataset editor, review **Fields**.
+2. Optionally add calculated fields (e.g. `total_traffic_mb = bytes / 1048576`).
+3. Set dimension vs measure types for `srcaddr`, `dstaddr`, `bytes`, `packets`, etc.
+
+### Step 4: Create an Analysis
+
+1. QuickSight → **Analyses** → **New analysis**.
+2. Select the dataset `VPC Flow Logs Hourly`.
+3. Add visuals and filters.
+
+### Step 5: Suggested Visuals for VPC Flow Logs
+
+| Visual | Purpose | Fields |
+|--------|---------|--------|
+| **Bar chart** | Top source IPs by bytes | Dimension: `srcaddr` (top 20), Value: `Sum(bytes)` |
+| **Bar chart** | Top destination IPs by bytes | Dimension: `dstaddr`, Value: `Sum(bytes)` |
+| **Bar chart** | Top srcaddr–dstaddr pairs | Dimensions: `srcaddr`, `dstaddr`, Value: `Sum(bytes)` |
+| **Pie chart** | ACCEPT vs REJECT | Dimension: `action`, Value: `Count(*)` or `Sum(bytes)` |
+| **Horizontal bar** | Top ports by bytes | Dimension: `dstport`, Value: `Sum(bytes)` |
+| **Line chart** | Traffic over time | X-axis: `year`, `month`, `day`, `hour` (or combined date), Value: `Sum(bytes)` |
+| **KPI** | Total flows | Value: `Count(*)` |
+| **KPI** | Total bytes | Value: `Sum(bytes)` |
+| **KPI** | Total packets | Value: `Sum(packets)` |
+| **Table** | Detail view | Columns: `srcaddr`, `dstaddr`, `action`, `bytes`, `packets`, etc. |
+
+### Step 6: Add Filters
+
+1. Add **Filters** on partition columns to reduce scan and cost: `year`, `month`, `day`, `hour`.
+2. Add filters on `action` (ACCEPT/REJECT), `dstport` (e.g. 8080), or `srcaddr`/`dstaddr` as needed.
+
+### Step 7: Publish Dashboard
+
+1. **Share** → **Publish dashboard**.
+2. Name the dashboard (e.g. `VPC Flow Logs Analysis`).
+3. Share with users or groups if required.
+
+### Step 8: Refresh SPICE (if using SPICE)
+
+1. QuickSight → **Datasets** → select the dataset.
+2. **Schedule refresh** and set interval (e.g. daily or every few hours).
+3. Or use **Refresh** manually when needed.
+
+### Checklist
+
+- [ ] Athena table exists and returns data
+- [ ] QuickSight and Athena in same region
+- [ ] IAM permissions set for Athena, Glue, S3
+- [ ] Dataset created from Athena
+- [ ] SPICE or Direct query selected
+- [ ] Visuals added (bytes, packets, top talkers, ACCEPT vs REJECT, time series)
+- [ ] Filters added (year, month, day, action, etc.)
+- [ ] Dashboard published and shared (if needed)
+- [ ] SPICE refresh scheduled (if using SPICE)
