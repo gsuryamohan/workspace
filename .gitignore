@@ -30,6 +30,7 @@ out/
 .env
 .env.local
 *.pem
+.ec2-connect-keys/
 
 # Logs
 *.log

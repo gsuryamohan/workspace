@@ -1,0 +1,7 @@
+[Unit]
+Description=Certbot renewal for Let's Encrypt
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot/bin/certbot renew -q --deploy-hook "systemctl reload nginx"

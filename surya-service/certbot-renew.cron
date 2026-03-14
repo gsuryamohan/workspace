@@ -1,0 +1,3 @@
+# Certbot renewal: run twice daily (Let's Encrypt certs expire in 90 days)
+# --deploy-hook reloads nginx so new cert is used
+0 0,12 * * * root /opt/certbot/bin/certbot renew -q --deploy-hook "systemctl reload nginx" 2>/dev/null
