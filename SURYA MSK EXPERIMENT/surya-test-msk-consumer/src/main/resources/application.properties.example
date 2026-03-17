@@ -1,0 +1,8 @@
+# Surya-Test-Consumer-1 — MSK demo-cluster-1
+# 1) MSK console → cluster "demo-cluster-1" → Client information → copy TLS bootstrap servers
+# 2) export KAFKA_BOOTSTRAP_SERVERS="b-1....:9094,b-2....:9094"
+# 3) export KAFKA_TOPIC="surya-test-topic"   # same topic as publisher
+# 4) mvn exec:java@Surya-Test-Consumer-1
+#
+# Optional: KAFKA_GROUP_ID (default surya-demo-cluster-1-Surya-Test-Consumer-1)
+# CLI bootstrap: aws kafka get-bootstrap-brokers --cluster-arn <arn>

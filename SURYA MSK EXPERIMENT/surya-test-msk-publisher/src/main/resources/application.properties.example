@@ -1,0 +1,18 @@
+# demo-cluster-1 → topic surya-test-topic (defaults in code)
+#
+# 1) Bootstrap (IAM, port 9098):
+#    aws kafka get-bootstrap-brokers --region us-east-1 --cluster-arn <demo-cluster-1-arn>
+#    Use BootstrapBrokerStringSaslIam only.
+#
+# 2) Run (credentials need kafka-cluster:Connect on this cluster):
+export AWS_REGION=us-east-1
+export KAFKA_BOOTSTRAP_SERVERS="b-3....kafka.us-east-1.amazonaws.com:9098,b-2....:9098,b-1....:9098"
+export KAFKA_TOPIC=surya-test-topic
+#
+# 3) One-off publish:
+#    mvn -q exec:java
+# 4) Surya-Test-Publisher-1 — 1 KB random text, 1 msg/sec, infinite loop:
+#    mvn -q exec:java@Surya-Test-Publisher-1
+#    Optional: PUBLISHER_PAYLOAD_CHARS=1024 PUBLISHER_INTERVAL_MS=1000
+#
+# MSK_USE_IAM=true forces IAM even if not using 9098. KAFKA_SECURITY_PROTOCOL only used when IAM off.
