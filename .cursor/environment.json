@@ -1,0 +1,24 @@
+{
+  "name": "Workspace Dev",
+  "install": ".cursor/cloud-agent-install.sh",
+  "terminals": [
+    {
+      "name": "simplemath-api",
+      "command": "cd simplemath-service && ./mvnw spring-boot:run"
+    },
+    {
+      "name": "fresh-samosa",
+      "command": "cd fresh-samosa && npm run dev -- --host 0.0.0.0 --port 5173"
+    }
+  ],
+  "ports": [
+    {
+      "name": "SimpleMath API",
+      "port": 8080
+    },
+    {
+      "name": "Fresh Samosa",
+      "port": 5173
+    }
+  ]
+}
